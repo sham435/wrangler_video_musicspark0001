@@ -25,8 +25,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg libasound2t64 curl unzip python3-pip
-          # c2patool
-          curl -sL -o c2pa.tar.gz https://github.com/contentauth/c2patool/releases/download/v0.10.0/c2patool-v0.10.0-linux.tar.gz
+          # c2patool v0.9.12 (latest working Linux release)
+          curl -sL -o c2pa.tar.gz https://github.com/contentauth/c2patool/releases/download/v0.9.12/c2patool-v0.9.12-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf c2pa.tar.gz
           sudo mv c2patool /usr/local/bin/
           c2patool --version
