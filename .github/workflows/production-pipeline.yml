@@ -21,6 +21,13 @@ jobs:
       - name: Checkout Runtime Infrastructure
         uses: actions/checkout@v4
 
+      - name: Download Artifacts from Previous Stage
+        if: github.event.inputs.execution_stage != 'SCHEDULED' && github.event.inputs.execution_stage != 'DISCOVER'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.inputs.production_uuid }}-artifacts
+          path: /tmp/${{ github.event.inputs.production_uuid }}
+
       - name: Initialize System Dependencies
         run: |
           sudo apt-get update -qq
@@ -58,3 +65,11 @@ jobs:
           C2PA_KEY_PEM: ${{ secrets.C2PA_KEY_PEM }}
         run: |
           node scripts/engine-runner.js
+
+      - name: Upload Artifacts for Next Stage
+        if: github.event.inputs.execution_stage != 'LEARN'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.production_uuid }}-artifacts
+          path: /tmp/${{ github.event.inputs.production_uuid }}/
+          retention-days: 1
