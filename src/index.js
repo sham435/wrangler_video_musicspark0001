@@ -17,20 +17,22 @@ export default {
   },
 
   async fetch(request, env, ctx) {
-    if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+    if (request.method !== "POST" && request.method !== "GET") {
+      return new Response("Method not allowed", { status: 405 });
+    }
     
     const url = new URL(request.url);
-    if (url.pathname === "/webhook/callback") {
+    
+    // Webhook callback from GitHub Actions
+    if (url.pathname === "/webhook/callback" && request.method === "POST") {
       const { production_uuid, completed_stage, data } = await request.json();
       
-      // Update metadata but don't advance state yet
       await env.DB.prepare(
         `UPDATE production_jobs 
          SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP 
          WHERE production_uuid = ?`
       ).bind(JSON.stringify(data), production_uuid).run();
 
-      // Dispatch the NEXT stage after this one completes
       ctx.waitUntil(dispatchNextStage(production_uuid, completed_stage, env));
       return new Response("Stage completed, dispatching next.", { status: 200 });
     }
@@ -41,6 +43,32 @@ export default {
                      request.headers.get("X-Test-Mode") === "true";
       ctx.waitUntil(handleOrchestrationLoop(env, isTest));
       return new Response(isTest ? "Test production started" : "Production started", { status: 200 });
+    }
+    
+    // Artifact download endpoint
+    if (url.pathname.startsWith("/artifacts/") && request.method === "GET") {
+      const uuid = url.pathname.split("/artifacts/")[1];
+      const key = `artifacts:${uuid}`;
+      const stored = await env.KV.get(key, { type: 'json' });
+      if (!stored) {
+        return new Response(JSON.stringify({ files: {} }), { status: 200, headers: { 'Content-Type': 'application/json' }});
+      }
+      return new Response(JSON.stringify(stored), { headers: { 'Content-Type': 'application/json' }});
+    }
+    
+    // Artifact upload endpoint
+    if (url.pathname.startsWith("/artifacts/") && request.method === "POST") {
+      const uuid = url.pathname.split("/artifacts/")[1];
+      const { files } = await request.json();
+      const key = `artifacts:${uuid}`;
+      
+      // Merge with existing artifacts
+      const existing = await env.KV.get(key, { type: 'json' }) || { files: {} };
+      existing.files = { ...existing.files, ...files };
+      existing.updated_at = new Date().toISOString();
+      
+      await env.KV.put(key, JSON.stringify(existing));
+      return new Response("Artifacts stored", { status: 200 });
     }
     
     return new Response("Not Found", { status: 404 });
@@ -66,7 +94,6 @@ async function handleOrchestrationLoop(env, isTest = false) {
     "INSERT INTO production_jobs (production_uuid, current_state) VALUES (?, 'SCHEDULED')"
   ).bind(uuid).run();
   
-  // Dispatch first stage (DISCOVER)
   await triggerGitHubWorkflow(uuid, 'DISCOVER', env);
 }
 
@@ -79,7 +106,6 @@ async function dispatchNextStage(uuid, completedStage, env) {
   
   const nextStage = MACRO_STAGES[completedIdx + 1];
   
-  // Update state to the next stage that will run
   await env.DB.prepare(
     `UPDATE production_jobs 
      SET current_state = ?, updated_at = CURRENT_TIMESTAMP 
