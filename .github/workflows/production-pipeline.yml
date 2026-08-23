@@ -28,7 +28,7 @@ jobs:
           # c2patool v0.9.12 (latest working Linux release)
           curl -sL -o c2pa.tar.gz https://github.com/contentauth/c2patool/releases/download/v0.9.12/c2patool-v0.9.12-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf c2pa.tar.gz
-          sudo mv c2patool /usr/local/bin/
+          sudo mv c2patool/c2patool /usr/local/bin/
           c2patool --version
 
       - name: Setup Node.js & Python
