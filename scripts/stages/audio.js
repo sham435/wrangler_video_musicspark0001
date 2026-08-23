@@ -3,7 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-async function withRetry(fn, maxRetries = 5, baseDelay = 2000) {
+async function withRetry(fn, maxRetries = 10, baseDelay = 3000) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
@@ -12,9 +12,17 @@ async function withRetry(fn, maxRetries = 5, baseDelay = 2000) {
       const isServerError = e.response?.status >= 500;
       
       if ((isRateLimit || isServerError) && attempt < maxRetries) {
-        const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 2000;
-        console.warn(`Attempt ${attempt} failed (${e.response?.status || e.message}), retrying in ${Math.round(delay)}ms...`);
-        await new Promise(r => setTimeout(r, delay));
+        const resetAfter = e.response?.headers?.['x-ratelimit-reset'] 
+          ? parseInt(e.response.headers['x-ratelimit-reset']) * 1000 - Date.now()
+          : null;
+        
+        const delay = resetAfter && resetAfter > 0 
+          ? Math.min(resetAfter + 1000, 60000)
+          : baseDelay * Math.pow(2, attempt - 1) + Math.random() * 3000;
+        
+        const cappedDelay = Math.min(delay, 60000);
+        console.warn(`Attempt ${attempt} failed (${e.response?.status || e.message}), retrying in ${Math.round(cappedDelay)}ms...`);
+        await new Promise(r => setTimeout(r, cappedDelay));
         continue;
       }
       throw e;
@@ -40,7 +48,7 @@ async function generateAudio(scenes) {
           'Accept': 'audio/mpeg'
         },
         responseType: 'arraybuffer',
-        timeout: 60000
+        timeout: 120000
       }
     ));
     fs.writeFileSync('vocals.mp3', res.data);
