@@ -19,10 +19,10 @@ const stage = process.env.TARGET_STAGE;
 const WORKER_URL = process.env.CLOUDFLARE_WORKER_URL;
 const WORK_DIR = `/tmp/${uuid}`;
 
-async function callback(nextState, data = {}) {
+async function callback(completedStage, data = {}) {
   await axios.post(`${WORKER_URL}/webhook/callback`, {
     production_uuid: uuid,
-    next_state: nextState,
+    completed_stage: completedStage,
     data: { ...data, last_executed: new Date().toISOString() }
   });
 }
@@ -35,14 +35,14 @@ async function runEngine() {
   try {
     switch (stage) {
       case 'SCHEDULED':
-        await callback('DISCOVER');
+        await callback('SCHEDULED');
         break;
 
       case 'DISCOVER': {
         const { trends, sourceContext } = await generate();
         fs.writeFileSync('trends.json', JSON.stringify(trends));
         fs.writeFileSync('source_context.txt', sourceContext);
-        await callback('CREATIVE', { trends });
+        await callback('DISCOVER', { trends });
         break;
       }
 
@@ -53,7 +53,7 @@ async function runEngine() {
         
         const scenes = await planScenes(storyboard);
         fs.writeFileSync('scenes.json', JSON.stringify(scenes));
-        await callback('GENERATE', { storyboard, scenes });
+        await callback('CREATIVE', { storyboard, scenes });
         break;
       }
 
@@ -61,7 +61,7 @@ async function runEngine() {
         const scenes = JSON.parse(fs.readFileSync('scenes.json', 'utf8'));
         await generateVisuals(scenes);
         await generateAudio(scenes);
-        await callback('RENDER');
+        await callback('GENERATE');
         break;
       }
 
@@ -71,7 +71,7 @@ async function runEngine() {
         await generateThumbnails();
         const scores = await judgeThumbnails();
         await selectThumbnail(scores);
-        await callback('SIGN');
+        await callback('RENDER');
         break;
       }
 
@@ -79,7 +79,7 @@ async function runEngine() {
         await preflightCheck();
         await signC2PA();
         await verifyC2PA();
-        await callback('PUBLISH');
+        await callback('SIGN');
         break;
       }
 
@@ -92,7 +92,7 @@ async function runEngine() {
         await publishVideo(videoId);
         await verifyPublication(videoId);
         fs.writeFileSync('publish_result.json', JSON.stringify({ videoId }));
-        await callback('LEARN', { videoId });
+        await callback('PUBLISH', { videoId });
         break;
       }
 

@@ -1,6 +1,16 @@
 // src/index.js - Cloudflare Worker Orchestrator
 const MAX_SHORTS_PER_DAY = 10;
 
+const MACRO_STAGES = [
+  'SCHEDULED', 'DISCOVER', 'CREATIVE', 'GENERATE', 
+  'RENDER', 'SIGN', 'PUBLISH', 'LEARN'
+];
+
+const STAGE_ORDER = {
+  'SCHEDULED': 0, 'DISCOVER': 1, 'CREATIVE': 2, 'GENERATE': 3,
+  'RENDER': 4, 'SIGN': 5, 'PUBLISH': 6, 'LEARN': 7
+};
+
 export default {
   async cronTrigger(event, env, ctx) {
     ctx.waitUntil(handleOrchestrationLoop(env, false));
@@ -11,16 +21,18 @@ export default {
     
     const url = new URL(request.url);
     if (url.pathname === "/webhook/callback") {
-      const { production_uuid, next_state, data } = await request.json();
+      const { production_uuid, completed_stage, data } = await request.json();
       
+      // Update metadata but don't advance state yet
       await env.DB.prepare(
         `UPDATE production_jobs 
-         SET current_state = ?, metadata_json = ?, updated_at = CURRENT_TIMESTAMP 
+         SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP 
          WHERE production_uuid = ?`
-      ).bind(next_state, JSON.stringify(data), production_uuid).run();
+      ).bind(JSON.stringify(data), production_uuid).run();
 
-      ctx.waitUntil(processState(production_uuid, next_state, env));
-      return new Response("State updated, proceeding.", { status: 200 });
+      // Dispatch the NEXT stage after this one completes
+      ctx.waitUntil(dispatchNextStage(production_uuid, completed_stage, env));
+      return new Response("Stage completed, dispatching next.", { status: 200 });
     }
     
     // Manual trigger endpoint for testing (bypasses daily limit)
@@ -34,11 +46,6 @@ export default {
     return new Response("Not Found", { status: 404 });
   }
 };
-
-const MACRO_STAGES = [
-  'SCHEDULED', 'DISCOVER', 'CREATIVE', 'GENERATE', 
-  'RENDER', 'SIGN', 'PUBLISH', 'LEARN'
-];
 
 async function handleOrchestrationLoop(env, isTest = false) {
   if (!isTest) {
@@ -58,15 +65,28 @@ async function handleOrchestrationLoop(env, isTest = false) {
   await env.DB.prepare(
     "INSERT INTO production_jobs (production_uuid, current_state) VALUES (?, 'SCHEDULED')"
   ).bind(uuid).run();
-  await processState(uuid, 'SCHEDULED', env);
+  
+  // Dispatch first stage (DISCOVER)
+  await triggerGitHubWorkflow(uuid, 'DISCOVER', env);
 }
 
-async function processState(uuid, state, env) {
-  const idx = MACRO_STAGES.indexOf(state);
-  if (idx === -1 || idx === MACRO_STAGES.length - 1) return;
+async function dispatchNextStage(uuid, completedStage, env) {
+  const completedIdx = STAGE_ORDER[completedStage];
+  if (completedIdx === undefined || completedIdx >= MACRO_STAGES.length - 1) {
+    console.log(`Production ${uuid} completed all stages`);
+    return;
+  }
   
-  const nextState = MACRO_STAGES[idx + 1];
-  await triggerGitHubWorkflow(uuid, nextState, env);
+  const nextStage = MACRO_STAGES[completedIdx + 1];
+  
+  // Update state to the next stage that will run
+  await env.DB.prepare(
+    `UPDATE production_jobs 
+     SET current_state = ?, updated_at = CURRENT_TIMESTAMP 
+     WHERE production_uuid = ?`
+  ).bind(nextStage, uuid).run();
+  
+  await triggerGitHubWorkflow(uuid, nextStage, env);
 }
 
 async function triggerGitHubWorkflow(uuid, stage, env) {
