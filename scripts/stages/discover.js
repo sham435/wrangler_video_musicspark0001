@@ -37,8 +37,10 @@ async function generate() {
     const topIds = hnRes.data.slice(0, 10);
     for (const id of topIds) {
       try {
-        const item = await axios.get(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 3000 });
-        if (item.data?.title) trends.themes.push(item.data.title);
+        const item = await axios.get(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 3000, validateStatus: () => true });
+        if (item.status === 200 && item.data?.title) {
+          trends.themes.push(item.data.title);
+        }
       } catch (itemErr) {
         console.warn(`HN item ${id} failed:`, itemErr.message);
       }
@@ -49,9 +51,14 @@ async function generate() {
   try {
     const rdRes = await axios.get('https://www.reddit.com/r/technology/hot.json?limit=10', {
       headers: { 'User-Agent': 'AutonomousShortsBot/1.0' },
-      timeout: 10000
+      timeout: 10000,
+      validateStatus: () => true
     });
-    trends.themes.push(...rdRes.data.data.children.map(c => c.data.title).slice(0, 5));
+    if (rdRes.status === 200) {
+      trends.themes.push(...rdRes.data.data.children.map(c => c.data.title).slice(0, 5));
+    } else {
+      console.warn('Reddit failed:', rdRes.status);
+    }
   } catch (e) { console.warn('Reddit failed:', e.message); }
 
   // Fallback: if all sources failed, use defaults
