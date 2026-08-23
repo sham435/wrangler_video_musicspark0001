@@ -3,6 +3,25 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const axios = require('axios');
 
+async function withRetry(fn, maxRetries = 3, baseDelay = 1000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const isRateLimit = e.response?.status === 429;
+      const isServerError = e.response?.status >= 500;
+      
+      if ((isRateLimit || isServerError) && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+        console.warn(`Attempt ${attempt} failed (${e.response?.status || e.message}), retrying in ${Math.round(delay)}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function renderVideo(scenes) {
   const inputs = scenes.map((_, i) => `-loop 1 -t ${scenes[i].end_time - scenes[i].start_time} -i scene_${i+1}.png`).join(' ');
   const filterParts = scenes.map((_, i) => `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[v${i}]`).join(';');
@@ -68,7 +87,7 @@ async function judgeThumbnails() {
     if (!fs.existsSync(thumb)) continue;
     const b64 = fs.readFileSync(thumb, { encoding: 'base64' });
     
-    const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+    const res = await withRetry(() => axios.post('https://api.openai.com/v1/chat/completions', {
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
@@ -78,7 +97,7 @@ async function judgeThumbnails() {
         ]
       }],
       max_tokens: 100
-    }, { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, timeout: 30000 });
+    }, { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, timeout: 30000 }));
     
     const result = JSON.parse(res.data.choices[0].message.content);
     scores[thumb] = result.score;
@@ -93,4 +112,4 @@ async function selectThumbnail(scores) {
   }
 }
 
-module.exports = { renderVideo, generateThumbnails, judgeThumbnails, selectThumbnail };
+module.exports = { renderVideo, generateThumbnails, judgeThumbnails, selectThumbnail, withRetry };

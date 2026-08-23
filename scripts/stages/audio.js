@@ -3,12 +3,31 @@ const axios = require('axios');
 const fs = require('fs');
 const { execSync } = require('child_process');
 
+async function withRetry(fn, maxRetries = 3, baseDelay = 1000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const isRateLimit = e.response?.status === 429;
+      const isServerError = e.response?.status >= 500;
+      
+      if ((isRateLimit || isServerError) && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+        console.warn(`Attempt ${attempt} failed (${e.response?.status || e.message}), retrying in ${Math.round(delay)}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function generateAudio(scenes) {
   const fullLyrics = scenes.map(s => s.lyric_segment).join(' ');
   
   // 1. Vocals via ElevenLabs (free tier ~10k chars/mo)
   try {
-    const res = await axios.post(
+    const res = await withRetry(() => axios.post(
       'https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM',
       {
         text: fullLyrics,
@@ -23,7 +42,7 @@ async function generateAudio(scenes) {
         responseType: 'arraybuffer',
         timeout: 60000
       }
-    );
+    ));
     fs.writeFileSync('vocals.mp3', res.data);
     execSync('ffmpeg -y -i vocals.mp3 -ar 44100 -ac 2 vocals.wav');
   } catch (e) {
@@ -66,4 +85,4 @@ with AudioFile('output_audio.wav', 'w', 44100, mixed.shape[0]) as f:
   execSync('ffmpeg -y -i output_audio.wav -af loudnorm=I=-14:TP=-1:LRA=11 output_audio.mp3');
 }
 
-module.exports = { generateAudio };
+module.exports = { generateAudio, withRetry };
