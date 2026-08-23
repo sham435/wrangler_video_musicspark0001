@@ -1,6 +1,17 @@
 // scripts/stages/discover.js
 const axios = require('axios');
 
+const FALLBACK_THEMES = [
+  'AI music generation trends',
+  'Cyberpunk aesthetic visuals',
+  'Lo-fi beats for studying',
+  'Synthwave retro vibes',
+  'Ambient electronic soundscapes',
+  'Music production tips',
+  'Digital art and animation',
+  'Technology and creativity'
+];
+
 async function generate() {
   const trends = { themes: [], bpmRange: [120, 140], tone: 'energetic' };
 
@@ -25,8 +36,12 @@ async function generate() {
     const hnRes = await axios.get('https://hacker-news.firebaseio.com/v0/topstories.json', { timeout: 5000 });
     const topIds = hnRes.data.slice(0, 10);
     for (const id of topIds) {
-      const item = await axios.get(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 3000 });
-      if (item.data.title) trends.themes.push(item.data.title);
+      try {
+        const item = await axios.get(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 3000 });
+        if (item.data?.title) trends.themes.push(item.data.title);
+      } catch (itemErr) {
+        console.warn(`HN item ${id} failed:`, itemErr.message);
+      }
     }
   } catch (e) { console.warn('HN failed:', e.message); }
 
@@ -38,6 +53,12 @@ async function generate() {
     });
     trends.themes.push(...rdRes.data.data.children.map(c => c.data.title).slice(0, 5));
   } catch (e) { console.warn('Reddit failed:', e.message); }
+
+  // Fallback: if all sources failed, use defaults
+  if (trends.themes.length === 0) {
+    console.warn('All trend sources failed, using fallback themes');
+    trends.themes = FALLBACK_THEMES;
+  }
 
   const sourceContext = trends.themes.slice(0, 10).join('\n---\n');
   return { trends, sourceContext };
