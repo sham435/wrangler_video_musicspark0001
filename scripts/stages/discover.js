@@ -12,54 +12,64 @@ const FALLBACK_THEMES = [
   'Technology and creativity'
 ];
 
+async function safeGet(url, options = {}) {
+  try {
+    const res = await axios.get(url, { 
+      timeout: options.timeout || 5000,
+      validateStatus: () => true,
+      ...options
+    });
+    return { success: res.status === 200, data: res.data, status: res.status };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 async function generate() {
   const trends = { themes: [], bpmRange: [120, 140], tone: 'energetic' };
 
   // 1. YouTube Data API v3 (10k units/day free)
-  try {
-    const ytRes = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-      params: {
-        part: 'snippet',
-        chart: 'mostPopular',
-        regionCode: 'US',
-        videoCategoryId: '10',
-        maxResults: 20,
-        key: process.env.YOUTUBE_API_KEY
-      },
-      timeout: 10000
-    });
-    trends.themes.push(...ytRes.data.items.map(i => i.snippet.title).slice(0, 5));
-  } catch (e) { console.warn('YouTube Trends failed:', e.message); }
+  const yt = await safeGet('https://www.googleapis.com/youtube/v3/search', {
+    params: {
+      part: 'snippet',
+      chart: 'mostPopular',
+      regionCode: 'US',
+      videoCategoryId: '10',
+      maxResults: 20,
+      key: process.env.YOUTUBE_API_KEY
+    },
+    timeout: 10000
+  });
+  if (yt.success) {
+    trends.themes.push(...yt.data.items.map(i => i.snippet.title).slice(0, 5));
+  } else {
+    console.warn('YouTube Trends failed:', yt.error || `status ${yt.status}`);
+  }
 
   // 2. Hacker News (no auth, reliable)
-  try {
-    const hnRes = await axios.get('https://hacker-news.firebaseio.com/v0/topstories.json', { timeout: 5000 });
-    const topIds = hnRes.data.slice(0, 10);
+  const hnTop = await safeGet('https://hacker-news.firebaseio.com/v0/topstories.json', { timeout: 5000 });
+  if (hnTop.success) {
+    const topIds = hnTop.data.slice(0, 10);
     for (const id of topIds) {
-      try {
-        const item = await axios.get(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 3000, validateStatus: () => true });
-        if (item.status === 200 && item.data?.title) {
-          trends.themes.push(item.data.title);
-        }
-      } catch (itemErr) {
-        console.warn(`HN item ${id} failed:`, itemErr.message);
+      const item = await safeGet(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 3000 });
+      if (item.success && item.data?.title) {
+        trends.themes.push(item.data.title);
       }
     }
-  } catch (e) { console.warn('HN failed:', e.message); }
+  } else {
+    console.warn('HN topstories failed:', hnTop.error || `status ${hnTop.status}`);
+  }
 
   // 3. Reddit JSON (no auth)
-  try {
-    const rdRes = await axios.get('https://www.reddit.com/r/technology/hot.json?limit=10', {
-      headers: { 'User-Agent': 'AutonomousShortsBot/1.0' },
-      timeout: 10000,
-      validateStatus: () => true
-    });
-    if (rdRes.status === 200) {
-      trends.themes.push(...rdRes.data.data.children.map(c => c.data.title).slice(0, 5));
-    } else {
-      console.warn('Reddit failed:', rdRes.status);
-    }
-  } catch (e) { console.warn('Reddit failed:', e.message); }
+  const rd = await safeGet('https://www.reddit.com/r/technology/hot.json?limit=10', {
+    headers: { 'User-Agent': 'AutonomousShortsBot/1.0' },
+    timeout: 10000
+  });
+  if (rd.success) {
+    trends.themes.push(...rd.data.data.children.map(c => c.data.title).slice(0, 5));
+  } else {
+    console.warn('Reddit failed:', rd.error || `status ${rd.status}`);
+  }
 
   // Fallback: if all sources failed, use defaults
   if (trends.themes.length === 0) {
