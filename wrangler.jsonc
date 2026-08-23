@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.jsonc",
+  "name": "autonomous-shorts-orchestrator",
+  "main": "src/index.js",
+  "compatibility_date": "2024-08-24",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "autonomous-shorts-db",
+      "database_id": "7cc1f719-6b64-4fc8-8ef4-f2e122f9674f"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "7b6f44cc09594cd09ce6c035cf027dc0"
+    }
+  ],
+  "vars": {
+    "GH_OWNER": "<your-github-username>",
+    "GH_REPO": "video_musicspark"
+  }
+}

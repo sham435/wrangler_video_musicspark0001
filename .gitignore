@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# Cloudflare
+.wrangler/
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+*.temp
+/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
