@@ -1,7 +1,9 @@
 // src/index.js - Cloudflare Worker Orchestrator
+const MAX_SHORTS_PER_DAY = 10;
+
 export default {
   async cronTrigger(event, env, ctx) {
-    ctx.waitUntil(handleOrchestrationLoop(env));
+    ctx.waitUntil(handleOrchestrationLoop(env, false));
   },
 
   async fetch(request, env, ctx) {
@@ -20,6 +22,15 @@ export default {
       ctx.waitUntil(processState(production_uuid, next_state, env));
       return new Response("State updated, proceeding.", { status: 200 });
     }
+    
+    // Manual trigger endpoint for testing (bypasses daily limit)
+    if (url.pathname === "/trigger" && request.method === "POST") {
+      const isTest = url.searchParams.get("test") === "true" || 
+                     request.headers.get("X-Test-Mode") === "true";
+      ctx.waitUntil(handleOrchestrationLoop(env, isTest));
+      return new Response(isTest ? "Test production started" : "Production started", { status: 200 });
+    }
+    
     return new Response("Not Found", { status: 404 });
   }
 };
@@ -29,7 +40,20 @@ const MACRO_STAGES = [
   'RENDER', 'SIGN', 'PUBLISH', 'LEARN'
 ];
 
-async function handleOrchestrationLoop(env) {
+async function handleOrchestrationLoop(env, isTest = false) {
+  if (!isTest) {
+    const today = new Date().toISOString().split('T')[0];
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) as cnt FROM production_jobs 
+       WHERE date(created_at) = ?`
+    ).bind(today).first();
+    
+    if (count && count.cnt >= MAX_SHORTS_PER_DAY) {
+      console.log(`Daily limit reached: ${count.cnt}/${MAX_SHORTS_PER_DAY} shorts for ${today}`);
+      return;
+    }
+  }
+
   const uuid = crypto.randomUUID();
   await env.DB.prepare(
     "INSERT INTO production_jobs (production_uuid, current_state) VALUES (?, 'SCHEDULED')"

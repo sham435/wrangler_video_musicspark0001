@@ -24,7 +24,7 @@ jobs:
       - name: Initialize System Dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg libasound2 curl unzip python3-pip
+          sudo apt-get install -y -qq ffmpeg libasound2t64 curl unzip python3-pip
           # c2patool
           curl -sL -o c2pa.tar.gz https://github.com/contentauth/c2patool/releases/download/v0.10.0/c2patool-v0.10.0-linux.tar.gz
           tar -xzf c2pa.tar.gz
@@ -34,7 +34,7 @@ jobs:
       - name: Setup Node.js & Python
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install Dependencies
