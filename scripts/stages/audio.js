@@ -3,7 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-async function withRetry(fn, maxRetries = 3, baseDelay = 1000) {
+async function withRetry(fn, maxRetries = 5, baseDelay = 2000) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
@@ -12,7 +12,7 @@ async function withRetry(fn, maxRetries = 3, baseDelay = 1000) {
       const isServerError = e.response?.status >= 500;
       
       if ((isRateLimit || isServerError) && attempt < maxRetries) {
-        const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+        const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 2000;
         console.warn(`Attempt ${attempt} failed (${e.response?.status || e.message}), retrying in ${Math.round(delay)}ms...`);
         await new Promise(r => setTimeout(r, delay));
         continue;
