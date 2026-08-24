@@ -43,7 +43,7 @@ const VISION_PROVIDERS = [
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: model || 'google/gemini-2.0-flash-exp:free',
+          model: model || 'google/gemma-4-31b-it:free',
           messages: messages,
           temperature: 0.3,
           max_tokens: 200,
@@ -59,10 +59,11 @@ const VISION_PROVIDERS = [
       return response.json();
     },
     models: [
-      'google/gemini-2.0-flash-exp:free',
-      'google/gemini-2.0-pro-exp-02-05:free',
-      'meta-llama/llama-3.2-90b-vision-instruct:free',
-      'qwen/qwen-2.5-72b-instruct:free'
+      'google/gemma-4-31b-it:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'deepseek/deepseek-v4-flash',
+      'qwen/qwen-2.5-72b-instruct:free',
+      'meta-llama/llama-3.2-90b-vision-instruct:free'
     ]
   },
   {

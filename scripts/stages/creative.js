@@ -43,7 +43,7 @@ const LLM_PROVIDERS = [
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: model || 'google/gemini-2.0-flash-exp:free',
+          model: model || 'google/gemma-4-31b-it:free',
           messages: messages,
           temperature: 0.7,
           max_tokens: 2000,
@@ -60,10 +60,12 @@ const LLM_PROVIDERS = [
       return response.json();
     },
     models: [
-      'google/gemini-2.0-flash-exp:free',
-      'google/gemini-2.0-pro-exp-02-05:free',
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'qwen/qwen-2.5-72b-instruct:free'
+      'google/gemma-4-31b-it:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'deepseek/deepseek-v4-flash',
+      'tencent/hy3-preview',
+      'qwen/qwen-2.5-72b-instruct:free',
+      'meta-llama/llama-3.3-70b-instruct:free'
     ]
   },
   {
