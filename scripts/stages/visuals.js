@@ -31,23 +31,32 @@ async function generateVisuals(scenes) {
       name: 'pollinations', 
       generate: async (prompt) => {
         const encodedPrompt = encodeURIComponent(`${prompt}, 1080x1920, vertical, 4k, high quality`);
-        // New Pollinations endpoint format
-        const res = await axios.get(`https://pollinations.ai/p/${encodedPrompt}`, { 
+        // Original working Pollinations endpoint
+        const res = await axios.get(`https://image.pollinations.ai/prompt/${encodedPrompt}`, { 
           responseType: 'arraybuffer',
           timeout: 60000
         });
+        // Validate response is actually an image (not HTML error page)
+        const contentType = res.headers['content-type'];
+        if (!contentType || !contentType.startsWith('image/')) {
+          throw new Error(`Invalid content-type: ${contentType}`);
+        }
         return Buffer.from(res.data);
       }
     },
     { 
       name: 'pollinations-alt', 
       generate: async (prompt) => {
-        // Alternative Pollinations endpoint
+        // Alternative: direct image URL with parameters
         const encodedPrompt = encodeURIComponent(`${prompt}, 1080x1920, vertical, 4k`);
-        const res = await axios.post('https://pollinations.ai/p', { prompt: encodedPrompt }, { 
+        const res = await axios.get(`https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux`, { 
           responseType: 'arraybuffer',
           timeout: 60000
         });
+        const contentType = res.headers['content-type'];
+        if (!contentType || !contentType.startsWith('image/')) {
+          throw new Error(`Invalid content-type: ${contentType}`);
+        }
         return Buffer.from(res.data);
       }
     }
@@ -89,14 +98,21 @@ async function generateVisuals(scenes) {
       const placeholderPrompt = `A vertical 1080x1920 gradient background with text "${scene.visual_prompt.substring(0, 50)}", cinematic lighting`;
       try {
         const encodedPrompt = encodeURIComponent(`${placeholderPrompt}, 1080x1920, vertical`);
-        const res = await axios.get(`https://image.pollinations.ai/prompt/${encodedPrompt}`, { 
+        const res = await axios.get(`https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920`, { 
           responseType: 'arraybuffer',
           timeout: 60000
         });
-        fs.writeFileSync(`scene_${scene.scene_id}.png`, Buffer.from(res.data));
-        console.log(`[Visuals] Scene ${scene.scene_id} generated placeholder`);
-        success = true;
+        const contentType = res.headers['content-type'];
+        if (contentType && contentType.startsWith('image/')) {
+          fs.writeFileSync(`scene_${scene.scene_id}.png`, Buffer.from(res.data));
+          console.log(`[Visuals] Scene ${scene.scene_id} generated placeholder`);
+          success = true;
+        }
       } catch (e) {
+        console.warn(`[Visuals] Placeholder failed:`, e.message);
+      }
+      
+      if (!success) {
         // Ultimate fallback: create solid color with ffmpeg
         execSync(`ffmpeg -y -f lavfi -i color=c=0x1a1a2e:size=1080x1920:duration=1 -vframes 1 scene_${scene.scene_id}.png`);
         console.log(`[Visuals] Scene ${scene.scene_id} generated solid color fallback`);
