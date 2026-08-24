@@ -31,7 +31,8 @@ async function generateVisuals(scenes) {
       name: 'pollinations', 
       generate: async (prompt) => {
         const encodedPrompt = encodeURIComponent(`${prompt}, 1080x1920, vertical, 4k, high quality`);
-        const res = await axios.get(`https://image.pollinations.ai/prompt/${encodedPrompt}`, { 
+        // New Pollinations endpoint format
+        const res = await axios.get(`https://pollinations.ai/p/${encodedPrompt}`, { 
           responseType: 'arraybuffer',
           timeout: 60000
         });
@@ -43,7 +44,7 @@ async function generateVisuals(scenes) {
       generate: async (prompt) => {
         // Alternative Pollinations endpoint
         const encodedPrompt = encodeURIComponent(`${prompt}, 1080x1920, vertical, 4k`);
-        const res = await axios.post('https://image.pollinations.ai/prompt', { prompt: encodedPrompt }, { 
+        const res = await axios.post('https://pollinations.ai/p', { prompt: encodedPrompt }, { 
           responseType: 'arraybuffer',
           timeout: 60000
         });

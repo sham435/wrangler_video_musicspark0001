@@ -136,13 +136,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     assContent += `Dialogue: 0,${start},${end},Default,,0,0,0,,${text}\n`;
   });
   
-  fs.writeFileSync('subtitles.ass', assContent);
+  const assPath = path.resolve('subtitles.ass');
+  fs.writeFileSync(assPath, assContent);
 
   execSync(`
     ffmpeg -y ${inputs} -i output_audio.mp3 \
       -filter_complex "${filterParts};${concatPart}" \
       -map "[outv]" -map 0:a \
-      -vf "subtitles=subtitles.ass" \
+      -vf "subtitles='${assPath}'" \
       -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p \
       -c:a aac -b:a 128k -r 30 -shortest \
       final_unsigned.mp4
