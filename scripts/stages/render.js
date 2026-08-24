@@ -3,13 +3,13 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const axios = require('axios');
 
-async function withRetry(fn, maxRetries = 10, baseDelay = 3000) {
+async function withRetry(fn, maxRetries = 5, baseDelay = 2000) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (e) {
-      const isRateLimit = e.response?.status === 429;
-      const isServerError = e.response?.status >= 500;
+      const isRateLimit = e.response?.status === 429 || e.status === 429;
+      const isServerError = e.response?.status >= 500 || e.status >= 500;
       
       if ((isRateLimit || isServerError) && attempt < maxRetries) {
         const resetAfter = e.response?.headers?.['x-ratelimit-reset'] 
@@ -17,11 +17,11 @@ async function withRetry(fn, maxRetries = 10, baseDelay = 3000) {
           : null;
         
         const delay = resetAfter && resetAfter > 0 
-          ? Math.min(resetAfter + 1000, 60000)
-          : baseDelay * Math.pow(2, attempt - 1) + Math.random() * 3000;
+          ? Math.min(resetAfter + 1000, 30000)
+          : baseDelay * Math.pow(2, attempt - 1) + Math.random() * 2000;
         
-        const cappedDelay = Math.min(delay, 60000);
-        console.warn(`Attempt ${attempt} failed (${e.response?.status || e.message}), retrying in ${Math.round(cappedDelay)}ms...`);
+        const cappedDelay = Math.min(delay, 30000);
+        console.warn(`Attempt ${attempt} failed (${e.response?.status || e.status || e.message}), retrying in ${Math.round(cappedDelay)}ms...`);
         await new Promise(r => setTimeout(r, cappedDelay));
         continue;
       }
@@ -30,12 +30,88 @@ async function withRetry(fn, maxRetries = 10, baseDelay = 3000) {
   }
 }
 
+const VISION_PROVIDERS = [
+  {
+    name: 'openrouter',
+    call: async (messages, model) => {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'HTTP-Referer': 'https://github.com/sham435/wrangler_video_musicspark0001',
+          'X-Title': 'VideoMusicSpark',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: model || 'google/gemini-2.0-flash-exp:free',
+          messages: messages,
+          temperature: 0.3,
+          max_tokens: 200,
+          response_format: { type: 'json_object' }
+        })
+      });
+      
+      if (!response.ok) {
+        const err = new Error(`OpenRouter ${response.status}`);
+        err.status = response.status;
+        throw err;
+      }
+      return response.json();
+    },
+    models: [
+      'google/gemini-2.0-flash-exp:free',
+      'google/gemini-2.0-pro-exp-02-05:free',
+      'meta-llama/llama-3.2-90b-vision-instruct:free',
+      'qwen/qwen-2.5-72b-instruct:free'
+    ]
+  },
+  {
+    name: 'openai',
+    call: async (messages, model) => {
+      const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: model || 'gpt-4o-mini',
+        messages: messages,
+        temperature: 0.3,
+        max_tokens: 200,
+        response_format: { type: 'json_object' }
+      }, { 
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, 
+        timeout: 60000 
+      });
+      return response.data;
+    },
+    models: ['gpt-4o-mini']
+  }
+];
+
+async function callVisionLLM(messages) {
+  for (const provider of VISION_PROVIDERS) {
+    for (const model of provider.models) {
+      const label = `${provider.name}/${model}`;
+      console.log(`[Vision] Trying ${label}...`);
+      
+      try {
+        const result = await withRetry(() => provider.call(messages, model));
+        const content = result.choices?.[0]?.message?.content;
+        
+        if (content) {
+          console.log(`[Vision] Success with ${label}`);
+          return JSON.parse(content);
+        }
+      } catch (error) {
+        console.warn(`[Vision] ${label} failed:`, error.message);
+        continue;
+      }
+    }
+  }
+  throw new Error('All vision LLM providers exhausted');
+}
+
 async function renderVideo(scenes) {
   const inputs = scenes.map((_, i) => `-loop 1 -t ${scenes[i].end_time - scenes[i].start_time} -i scene_${i+1}.png`).join(' ');
   const filterParts = scenes.map((_, i) => `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[v${i}]`).join(';');
   const concatPart = scenes.map((_, i) => `[v${i}]`).join('') + `concat=n=${scenes.length}:v=1:a=0[outv]`;
   
-  // Generate .ass subtitles with safe zones (avoid bottom 200px for TikTok/Shorts UI)
   let assContent = `[Script Info]
 Title: Subtitles
 ScriptType: v4.00+
@@ -95,23 +171,18 @@ async function judgeThumbnails() {
     if (!fs.existsSync(thumb)) continue;
     const b64 = fs.readFileSync(thumb, { encoding: 'base64' });
     
-    const res = await withRetry(() => axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4o-mini',
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Rate this YouTube Shorts thumbnail 1-10 on: text legibility, focal clarity, color contrast, platform safety compliance. Output ONLY JSON: {"score": N, "reason": "..."}' },
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
-        ]
-      }],
-      max_tokens: 100
-    }, { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, timeout: 120000 }));
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Rate this YouTube Shorts thumbnail 1-10 on: text legibility, focal clarity, color contrast, platform safety compliance. Output ONLY JSON: {"score": N, "reason": "..."}' },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
+      ]
+    }];
     
-    const result = JSON.parse(res.data.choices[0].message.content);
+    const result = await callVisionLLM(messages);
     scores[thumb] = result.score;
     
-    // Small delay between thumbnail judgments
-    await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000));
+    await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
   }
   return scores;
 }
