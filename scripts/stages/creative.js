@@ -1,7 +1,7 @@
 // scripts/stages/creative.js
 const axios = require('axios');
 
-async function withRetry(fn, maxRetries = 5, baseDelay = 2000) {
+async function withRetry(fn, maxRetries = 5, baseDelay = 2000, providerName = '') {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
@@ -15,10 +15,10 @@ async function withRetry(fn, maxRetries = 5, baseDelay = 2000) {
           : null;
         
         const delay = resetAfter && resetAfter > 0 
-          ? Math.min(resetAfter + 1000, 30000)
-          : baseDelay * Math.pow(2, attempt - 1) + Math.random() * 2000;
+          ? Math.min(resetAfter + 1000, 60000)
+          : baseDelay * Math.pow(2, attempt - 1) + Math.random() * 3000;
         
-        const cappedDelay = Math.min(delay, 30000);
+        const cappedDelay = Math.min(delay, 60000);
         console.warn(`[${providerName}] Attempt ${attempt} failed (${e.response?.status || e.status || e.message}), retrying in ${Math.round(cappedDelay)}ms...`);
         await new Promise(r => setTimeout(r, cappedDelay));
         continue;
@@ -27,8 +27,6 @@ async function withRetry(fn, maxRetries = 5, baseDelay = 2000) {
     }
   }
 }
-
-let providerName = '';
 
 const LLM_PROVIDERS = [
   {
@@ -66,7 +64,9 @@ const LLM_PROVIDERS = [
       'tencent/hy3-preview',
       'qwen/qwen-2.5-72b-instruct:free',
       'meta-llama/llama-3.3-70b-instruct:free'
-    ]
+    ],
+    // Longer delays for OpenRouter free tier
+    retryConfig: { maxRetries: 8, baseDelay: 5000 }
   },
   {
     name: 'opencode-zen',
@@ -88,7 +88,8 @@ const LLM_PROVIDERS = [
       }
       return response.json();
     },
-    models: ['qwen2.5:7b', 'llama3.2:3b', 'phi3:mini']
+    models: ['qwen2.5:7b', 'llama3.2:3b', 'phi3:mini'],
+    retryConfig: { maxRetries: 3, baseDelay: 3000 }
   },
   {
     name: 'openai',
@@ -104,20 +105,52 @@ const LLM_PROVIDERS = [
       });
       return response.data;
     },
-    models: ['gpt-4o-mini']
+    models: ['gpt-4o-mini'],
+    retryConfig: { maxRetries: 5, baseDelay: 5000 }
   }
 ];
+
+// Template fallback - no LLM needed
+function getTemplateStoryboard(trends) {
+  const theme = trends.themes[0] || 'Epic Music Journey';
+  const duration = 45;
+  return {
+    overall_theme: `Music video inspired by: ${theme}`,
+    target_duration: duration,
+    vibe_description: `${trends.tone} electronic music with dynamic visuals`
+  };
+}
+
+function getTemplateScenes(storyboard) {
+  const duration = storyboard.target_duration;
+  const sceneCount = Math.max(3, Math.ceil(duration / 3));
+  const sceneDuration = duration / sceneCount;
+  const scenes = [];
+  
+  for (let i = 1; i <= sceneCount; i++) {
+    scenes.push({
+      scene_id: i,
+      start_time: (i - 1) * sceneDuration,
+      end_time: i * sceneDuration,
+      visual_prompt: `Epic cinematic scene ${i}, ${storyboard.overall_theme}, vertical 9:16, vibrant colors, dynamic motion`,
+      lyric_segment: `[Beat ${i}]`,
+      audio_instruction: `High energy ${storyboard.vibe_description}, drop at ${i * sceneDuration}s`
+    });
+  }
+  return scenes;
+}
 
 async function callLLM(messages, preferredModel = null) {
   for (const provider of LLM_PROVIDERS) {
     const modelsToTry = preferredModel ? [preferredModel, ...provider.models.filter(m => m !== preferredModel)] : provider.models;
+    const retryConfig = provider.retryConfig || { maxRetries: 5, baseDelay: 2000 };
     
     for (const model of modelsToTry) {
-      providerName = `${provider.name}/${model}`;
-      console.log(`[LLM] Trying ${providerName}...`);
+      const label = `${provider.name}/${model}`;
+      console.log(`[LLM] Trying ${label}...`);
       
       try {
-        const result = await withRetry(() => provider.call(messages, model));
+        const result = await withRetry(() => provider.call(messages, model), retryConfig.maxRetries, retryConfig.baseDelay, label);
         
         let content;
         if (provider.name === 'openrouter' || provider.name === 'openai') {
@@ -127,16 +160,19 @@ async function callLLM(messages, preferredModel = null) {
         }
         
         if (content) {
-          console.log(`[LLM] Success with ${providerName}`);
+          console.log(`[LLM] Success with ${label}`);
           return JSON.parse(content);
         }
       } catch (error) {
-        console.warn(`[LLM] ${providerName} failed:`, error.message);
+        console.warn(`[LLM] ${label} failed:`, error.message);
         continue;
       }
     }
   }
-  throw new Error('All LLM providers exhausted');
+  
+  // All providers exhausted - use template fallback
+  console.log('[LLM] All providers exhausted, using template fallback');
+  throw new Error('TEMPLATE_FALLBACK');
 }
 
 async function generateStoryboard(trends) {
@@ -153,7 +189,15 @@ Output ONLY valid JSON:
 }`;
 
   const messages = [{ role: 'user', content: prompt }];
-  return callLLM(messages);
+  
+  try {
+    return await callLLM(messages);
+  } catch (e) {
+    if (e.message === 'TEMPLATE_FALLBACK') {
+      return getTemplateStoryboard(trends);
+    }
+    throw e;
+  }
 }
 
 async function planScenes(storyboard) {
@@ -172,8 +216,16 @@ Output ONLY valid JSON array:
   await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
 
   const messages = [{ role: 'user', content: prompt }];
-  const data = await callLLM(messages);
-  return data.scenes || data;
+  
+  try {
+    const data = await callLLM(messages);
+    return data.scenes || data;
+  } catch (e) {
+    if (e.message === 'TEMPLATE_FALLBACK') {
+      return getTemplateScenes(storyboard);
+    }
+    throw e;
+  }
 }
 
 module.exports = { generateStoryboard, planScenes };
